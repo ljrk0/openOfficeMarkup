@@ -407,56 +407,6 @@ removeTrailingNewline items =
 splitLines :: DocumentItem -> [String]
 splitLines (ItemWord source) = map (++"\n") $ S.splitOn "\n" source
 
--- | Prefix lines with a linenumber, starting at firstnumber and aligned s.t.,
--- they align with the maximum line number used.
-numberLines :: [String] -> Integer -> Integer -> [String]
-numberLines [] _ _ = []
-numberLines (l:ls) firstnumber maxln = (ln++sep++l):(numberLines ls (firstnumber+1) maxln)
-    where ln  = printf fmtstr $ firstnumber
-          sep = " | "
-          fmtstr = "%"++(show $ digits)++"d"
-          digits :: Integral i => i
-          digits = ceiling $ logBase 10 (fromInteger maxln)
-
--- | Create a list which, for each entry in the range, contains the sublist
--- source[l:l+n] containing the n lines starting at line l.
--- Lines may be duplicated.
-getSourceRanges :: [a] -> [(Integer,Integer)] -> [a]
-getSourceRanges [] _ = [] 
-getSourceRanges _ [] = []
-getSourceRanges source (r:rs) = (removeOutsideRange source r)++(getSourceRanges source rs)
-    where removeOutsideRange source (o,n) = take (fromInteger n) (drop (fromInteger o-1) source)
-
--- Encodes a range as a tuple of "start" and "length"
--- length > 0
-newtype Range = Range (Integer,Integer)
-instance Show Range where
-    show  (Range (a,b)) = (show a) ++ "-" ++ (show $ a+b-1)
--- shamelessly adapted from
--- https://coderedirect.com/questions/332937/making-a-read-instance-in-haskell
-instance Read Range where
-    readsPrec _ input =
-        let (starts,rest) = span isDigit input
-            start = read starts :: Integer
-            (d:rest2) = rest
-            (ends,rest3) = span isDigit rest2
-            end = read ends :: Integer
-            in
-        if d == '-' && end >= start then
-            [(Range (start,end-start+1), rest3)]
-        else []
-
--- | Parse a range of the format "12-15,9-11,15-23" and output a list of
--- starting lines as well as # of lines to include in the range.  In this case
--- [(12,4), (9,3), (15,9)].
-textRange ::  String -> [(Integer, Integer)]
-textRange s = map range2Tuple $ (read s' :: [Range])
-    where s' = "[" ++ s ++ "]"
-
-range2Tuple :: Range -> (Integer,Integer)
-range2Tuple (Range (a,b)) = (a,b)
-
-
 -- | Handle an extended command. This is called once a command
 -- has been found. It's responsible for returning the appropriate
 -- data structure for the parse tree.
@@ -529,22 +479,17 @@ handleExtendedCommand name args handleSpecialCommand =
 
       "_q"     -> handleInlineQuote handleSpecialCommand
       "source" -> do let language = fromMaybe "" $ lookup "language" args
-                     let firstnumber = fromMaybe 1 $ (\fn -> read fn :: Integer) <$> lookup "firstnumber" args
-                     let numbers = fromMaybe False $ (\n -> read n :: Bool) <$> lookup "numbers" args
+                     let firstNumber = fromMaybe 1 $ (\fn -> read fn :: Integer) <$> lookup "firstnumber" args
+                     let numberLines = fromMaybe False $ (\n -> read n :: Bool) <$> lookup "numbers" args
                      skipEmptyLines
                      source <- manyTill (verbatimContent "[/source]") (extendedCommandName "/source")
                      eatSpaces <- isOptionSet SkipNewlinesAfterSourceOrQuoteBlock
                      when eatSpaces skipEmptyLines
                      -- We assume that there's only a single ItemWord String collected.
                      let lines = splitLines $ head $ removeTrailingNewline source
-                     let offsetRange = fromMaybe [(firstnumber, (toInteger $ length lines))] $ textRange <$> lookup "range" args
-                     -- Offset our range by the first number
-                     let range = map (\(a,b) -> (a-firstnumber+1,b)) offsetRange
-                     let maxln = maximum $ map (\(a,b) -> a+b) offsetRange
-                     let numbered = if numbers then numberLines lines firstnumber maxln else lines
-                     -- Collect the lines we want to print into one String.
-                     let sourceRanges = concat $ getSourceRanges numbered range
-                     return $ ItemDocumentContainer $ DocumentMetaContainer ([ ("type", "source"), ("language", language)]) ([ItemWord sourceRanges])
+                     let ranges = fromMaybe [(firstNumber, (toInteger $ length lines))] $ textRange <$> lookup "range" args
+                     let itemWordLines = map (ItemWord) lines
+                     return $ ItemDocumentContainer $ DocumentMetaContainer ([ ("type", "source"), ("language", language), ("numberLines", show numberLines), ("firstNumber", show firstNumber), ("ranges", show ranges) ]) (itemWordLines)
       "label"  -> handleLab args
       "ref"    -> handleRef args
       "imgref" -> handleImgRef args

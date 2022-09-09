@@ -22,9 +22,10 @@ This module contains all the udoc-related data types.
 
 module Text.Udoc.Document 
    (DocumentItem(..), OListItem(..), UListItem(..), Heading(..),
-    DocumentContainer(..), DocumentImage(..),
+    DocumentContainer(..), DocumentImage(..), Range(..),
     computeHeadingNumbers, generateToc,
-    filterItems, transformDocument, extractWords)
+    filterItems, transformDocument, extractWords,
+    textRange)
 
 where
 
@@ -33,6 +34,7 @@ import           Control.Monad.State
 import           Data.Maybe
 import           Control.Applicative
 import           Data.List
+import           Data.Char
 
 
 ------------------------ Data Definitions -----------------------------
@@ -265,6 +267,37 @@ data DocumentImage = Image {
                       , imageScaling   :: String -- ^ An expected scaling factor (Default: 1.0)
                       , imageAlignment :: String -- ^ The alignment (Default: center)
                      } deriving(Show, Eq)
+
+
+{-| A range of lines to print/leave out-}
+-- Encodes a range as a tuple of "start" and "length"
+-- length > 0
+newtype Range = Range (Integer,Integer)
+instance Show Range where
+    show  (Range (a,b)) = (show a) ++ "-" ++ (show $ a+b-1)
+-- shamelessly adapted from
+-- https://coderedirect.com/questions/332937/making-a-read-instance-in-haskell
+instance Read Range where
+    readsPrec _ input =
+        let (starts,rest) = span isDigit input
+            start = read starts :: Integer
+            (d:rest2) = rest
+            (ends,rest3) = span isDigit rest2
+            end = read ends :: Integer
+            in
+        if d == '-' && end >= start then
+            [(Range (start,end-start+1), rest3)]
+        else []
+
+-- | Parse a range of the format "12-15,9-11,15-23" and output a list of
+-- starting lines as well as # of lines to include in the range.  In this case
+-- [(12,4), (9,3), (15,9)].
+textRange ::  String -> [(Integer, Integer)]
+textRange s = map range2Tuple $ (read s' :: [Range])
+    where s' = "[" ++ s ++ "]"
+
+range2Tuple :: Range -> (Integer,Integer)
+range2Tuple (Range (a,b)) = (a,b)
 
 instance JSON DocumentImage where
    showJSON (Image filename caption label scaling alignment) =
